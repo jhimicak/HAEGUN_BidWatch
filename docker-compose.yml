@@ -1,0 +1,55 @@
+version: '3.9'
+
+services:
+  # ─── PostgreSQL 데이터베이스 ───────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: haegun_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: haegun
+      POSTGRES_PASSWORD: haegun1234
+      POSTGRES_DB: haegun_bidwatch
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"       # 호스트에서 DB 직접 접근 시 사용 (선택)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U haegun -d haegun_bidwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Next.js 앱 (개발 서버) ───────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development        # 개발 스테이지 사용
+    container_name: haegun_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy  # DB가 준비된 후 시작
+    environment:
+      # DB 연결 (컨테이너 내부 네트워크 사용 → 'db'가 호스트명)
+      DATABASE_URL: "postgresql://haegun:haegun1234@db:5432/haegun_bidwatch"
+      NEXTAUTH_URL: "http://localhost:3000"
+      # NEXTAUTH_SECRET은 .env.local 파일로 주입됨 (아래 env_file 참고)
+      NODE_ENV: development
+      TZ: Asia/Seoul
+    env_file:
+      - .env.local               # NEXTAUTH_SECRET, OPENAI_API_KEY 등 민감 정보
+    ports:
+      - "3000:3000"              # 브라우저에서 http://localhost:3000 접속
+    volumes:
+      # 소스 코드를 실시간 동기화 (hot reload 작동)
+      - .:/app
+      # node_modules는 컨테이너 내부 것을 사용 (호스트 것 사용 안 함)
+      - /app/node_modules
+      # .next 빌드 캐시도 컨테이너 내부 것 사용
+      - /app/.next
+
+volumes:
+  postgres_data:                 # DB 데이터 영구 저장

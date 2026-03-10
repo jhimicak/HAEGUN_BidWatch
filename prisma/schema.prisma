@@ -1,0 +1,387 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────
+// 사용자
+// ─────────────────────────────────────
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  role          UserRole  @default(USER)
+  avatarUrl     String?
+  emailVerified DateTime?
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // NextAuth
+  accounts      Account[]
+  sessions      Session[]
+
+  // 서비스 관계
+  bookmarks     Bookmark[]
+  alertRules    AlertRule[]
+  notifications Notification[]
+  internalNotes InternalNote[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  MANAGER
+  ADMIN
+}
+
+// NextAuth 기본 테이블
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─────────────────────────────────────
+// 수집 소스 (크롤링 대상 사이트)
+// ─────────────────────────────────────
+model Source {
+  id            String       @id @default(uuid())
+  name          String
+  url           String
+  sourceType    SourceType   @default(WEB)
+  country       String?
+  region        String?
+  description   String?
+  listUrlPattern String?     // 목록 페이지 URL 패턴
+  detailUrlPattern String?   // 상세 페이지 URL 패턴
+  selectors     Json?        // CSS 선택자 설정 (JSON)
+  headers       Json?        // HTTP 헤더
+  cronSchedule  String?      // cron 표현식
+  isActive      Boolean      @default(true)
+  lastCrawledAt DateTime?
+  crawlIntervalHours Int     @default(24)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  tenders       Tender[]
+  crawlLogs     CrawlLog[]
+
+  @@map("sources")
+}
+
+enum SourceType {
+  WEB
+  RSS
+  API
+  EMAIL
+}
+
+// ─────────────────────────────────────
+// 공고 (핵심 테이블)
+// ─────────────────────────────────────
+model Tender {
+  id               String        @id @default(uuid())
+  sourceId         String?
+  sourceHash       String        @unique  // 중복 방지용 해시
+  title            String
+  titleKo          String?       // AI 번역 제목
+  projectNumber    String?       // 공고 번호
+  country          String
+  region           String?
+  city             String?
+  issuer           String        // 발주처
+  issuerType       String?       // 발주처 유형
+  category         String?       // 공종
+  subCategory      String?
+  contractType     String?       // 계약 방식
+  budget           Decimal?      @db.Decimal(20, 2)
+  budgetCurrency   String?       @default("USD")
+  budgetText       String?       // 원문 예산 표현
+  publishedAt      DateTime?
+  deadlineAt       DateTime?
+  estimatedStart   DateTime?
+  estimatedEnd     DateTime?
+  status           TenderStatus  @default(OPEN)
+  language         String?
+  originalUrl      String?
+  sourceUrl        String?
+
+  // AI 요약
+  summaryShort     String?       @db.Text
+  summaryLong      String?       @db.Text
+  qualificationText String?      @db.Text
+  importantNotes   String?       @db.Text
+  aiProcessedAt    DateTime?
+  aiModel          String?
+
+  // 메타
+  viewCount        Int           @default(0)
+  isManual         Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // 관계
+  source           Source?       @relation(fields: [sourceId], references: [id])
+  rawContent       TenderRawContent?
+  files            TenderFile[]
+  tags             TenderTag[]
+  bookmarks        Bookmark[]
+  internalNotes    InternalNote[]
+
+  @@index([country])
+  @@index([category])
+  @@index([deadlineAt])
+  @@index([publishedAt])
+  @@index([status])
+  @@index([sourceHash])
+  @@map("tenders")
+}
+
+enum TenderStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+  AWARDED
+  UNKNOWN
+}
+
+// ─────────────────────────────────────
+// 공고 원문 콘텐츠
+// ─────────────────────────────────────
+model TenderRawContent {
+  id          String   @id @default(uuid())
+  tenderId    String   @unique
+  rawText     String   @db.Text
+  rawHtml     String?  @db.Text
+  language    String?
+  charCount   Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tender      Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@map("tender_raw_contents")
+}
+
+// ─────────────────────────────────────
+// 공고 첨부파일
+// ─────────────────────────────────────
+model TenderFile {
+  id           String   @id @default(uuid())
+  tenderId     String
+  fileName     String
+  fileUrl      String
+  fileType     String?
+  fileSizeBytes Int?
+  description  String?
+  downloadedAt DateTime?
+  localPath    String?
+  createdAt    DateTime @default(now())
+
+  tender       Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@map("tender_files")
+}
+
+// ─────────────────────────────────────
+// 태그
+// ─────────────────────────────────────
+model Tag {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  nameKo      String?
+  color       String?
+  category    String?
+  createdAt   DateTime    @default(now())
+
+  tenderTags  TenderTag[]
+
+  @@map("tags")
+}
+
+model TenderTag {
+  tenderId    String
+  tagId       String
+
+  tender      Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tag         Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([tenderId, tagId])
+  @@map("tender_tags")
+}
+
+// ─────────────────────────────────────
+// 북마크
+// ─────────────────────────────────────
+model Bookmark {
+  id          String   @id @default(uuid())
+  userId      String
+  tenderId    String
+  note        String?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tender      Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenderId])
+  @@map("bookmarks")
+}
+
+// ─────────────────────────────────────
+// 알림 규칙
+// ─────────────────────────────────────
+model AlertRule {
+  id              String   @id @default(uuid())
+  userId          String
+  name            String
+  isActive        Boolean  @default(true)
+  emailEnabled    Boolean  @default(true)
+  
+  // 필터 조건
+  countries       String[] // 국가 목록
+  categories      String[] // 공종 목록
+  keywords        String[] // 키워드
+  minBudget       Decimal? @db.Decimal(20, 2)
+  maxBudget       Decimal? @db.Decimal(20, 2)
+  deadlineInDays  Int?     // 마감 X일 이내
+  issuers         String[] // 발주처 목록
+  
+  // 알림 발송 설정
+  notifyOnNew     Boolean  @default(true)
+  notifyBeforeDays Int?    // 마감 N일 전 알림
+  lastTriggeredAt DateTime?
+  triggerCount    Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notifications   Notification[]
+
+  @@map("alert_rules")
+}
+
+// ─────────────────────────────────────
+// 알림
+// ─────────────────────────────────────
+model Notification {
+  id            String           @id @default(uuid())
+  userId        String
+  alertRuleId   String?
+  type          NotificationType @default(NEW_TENDER)
+  channel       String           @default("email") // email, web, slack
+  title         String
+  body          String           @db.Text
+  tenderId      String?
+  isRead        Boolean          @default(false)
+  isSent        Boolean          @default(false)
+  sentAt        DateTime?
+  readAt        DateTime?
+  createdAt     DateTime         @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alertRule     AlertRule? @relation(fields: [alertRuleId], references: [id])
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  NEW_TENDER
+  DEADLINE_REMINDER
+  STATUS_CHANGE
+  SYSTEM
+}
+
+// ─────────────────────────────────────
+// 크롤링 로그
+// ─────────────────────────────────────
+model CrawlLog {
+  id            String       @id @default(uuid())
+  sourceId      String?
+  status        CrawlStatus  @default(RUNNING)
+  startedAt     DateTime     @default(now())
+  finishedAt    DateTime?
+  durationMs    Int?
+  totalFetched  Int          @default(0)
+  newCreated    Int          @default(0)
+  updated       Int          @default(0)
+  duplicates    Int          @default(0)
+  errors        Int          @default(0)
+  errorMessage  String?      @db.Text
+  logDetails    Json?
+  triggeredBy   String?      // 'cron', 'manual', 'api'
+
+  source        Source?      @relation(fields: [sourceId], references: [id])
+
+  @@map("crawl_logs")
+}
+
+enum CrawlStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+// ─────────────────────────────────────
+// 내부 메모
+// ─────────────────────────────────────
+model InternalNote {
+  id          String   @id @default(uuid())
+  tenderId    String
+  userId      String
+  content     String   @db.Text
+  isPrivate   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tender      Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("internal_notes")
+}
