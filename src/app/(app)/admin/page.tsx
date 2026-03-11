@@ -2,7 +2,9 @@ import { prisma } from '@/lib/prisma'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { formatDateTime } from '@/lib/utils'
-import { Database, RefreshCw, Plus, Activity, CheckCircle2, AlertTriangle, XCircle, Clock } from 'lucide-react'
+import { Database, RefreshCw, Plus, Activity, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
+import { CrawlButton } from '@/components/admin/CrawlButton'
+import { CrawlAllButton } from '@/components/admin/CrawlAllButton'
 
 async function getAdminData() {
     const [sources, crawlLogs, tenderCount, userCount] = await Promise.all([
@@ -46,9 +48,12 @@ export default async function AdminPage() {
 
     return (
         <div>
-            <div className="page-header">
-                <h1 className="page-title">관리자</h1>
-                <p className="page-subtitle">크롤링 소스 관리 및 수집 로그 조회</p>
+            <div className="page-header flex items-start justify-between gap-4">
+                <div>
+                    <h1 className="page-title">관리자</h1>
+                    <p className="page-subtitle">크롤링 소스 관리 및 수집 로그 조회</p>
+                </div>
+                <CrawlAllButton />
             </div>
 
             <div className="p-6 space-y-6">
@@ -107,22 +112,7 @@ export default async function AdminPage() {
                                         </span>
                                     </td>
                                     <td className="px-4 py-3">
-                                        <form action={`/api/admin/crawl`} method="POST">
-                                            <input type="hidden" name="sourceId" value={source.id} />
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    await fetch('/api/admin/crawl', {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({ sourceId: source.id }),
-                                                    })
-                                                }}
-                                                className="text-xs px-2.5 py-1 border border-border rounded hover:bg-muted transition-colors"
-                                            >
-                                                수동 실행
-                                            </button>
-                                        </form>
+                                        <CrawlButton sourceId={source.id} sourceName={source.name} />
                                     </td>
                                 </tr>
                             ))}

@@ -12,6 +12,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         include: {
             tags: { include: { tag: true } },
             files: true,
+            rawContent: true,
             internalNotes: {
                 orderBy: { createdAt: 'asc' },
                 include: { user: { select: { name: true } } },

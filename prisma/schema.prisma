@@ -102,6 +102,7 @@ model Source {
   selectors     Json?        // CSS 선택자 설정 (JSON)
   headers       Json?        // HTTP 헤더
   cronSchedule  String?      // cron 표현식
+  crawlerType   String?      // 파서 타입: WORLDBANK_API | ADB_SCRAPE | UNGM_SCRAPE
   isActive      Boolean      @default(true)
   lastCrawledAt DateTime?
   crawlIntervalHours Int     @default(24)
